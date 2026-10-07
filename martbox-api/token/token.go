@@ -1,6 +1,6 @@
 // Package token 负责签发和校验设备 token。
 //
-// 设备先用 imei 调 /author 换一个 token，后续建 websocket 长连接时带上它证明身份。
+// 设备先用 imei 换一个 token，后续建 websocket 长连接时带上它证明身份。
 // token 用 HS256 签发，密钥来自配置 Auth.Secret。
 package token
 

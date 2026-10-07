@@ -35,6 +35,13 @@ type AuthConf struct {
 	Expire int    `yaml:"Expire"` // token 有效期，秒；为 0 时用代码默认值（30 天）
 }
 
+// UnigateConf 是 Magensa Unigate 客户端的配置。
+type UnigateConf struct {
+	// LogRequestBody 打开后会把发往 Magensa 的请求体打到日志，用来确认
+	// ARQC 之类的字段是否为空或被截断。敏感字段（ARQC、磁道、卡号、CVV）会脱敏。
+	LogRequestBody bool `yaml:"LogRequestBody"`
+}
+
 type Config struct {
 	Mode string `yaml:"Mode"`
 
@@ -43,6 +50,8 @@ type Config struct {
 	WebSocket WebSocketConf `yaml:"WebSocket"`
 
 	Auth AuthConf `yaml:"Auth"`
+
+	Unigate UnigateConf `yaml:"Unigate"`
 
 	OrderPayLink `yaml:"OrderPayLink"`
 

@@ -17,6 +17,12 @@ Auth:
   Issuer: martbox-api
   Expire: 2592000      # 秒，token 有效期，默认 30 天
 
+Unigate:
+  # 打开后打印发往 Magensa 的请求体：ARQC/磁道/KSN/卡号/CVV 会脱敏成
+  # <redacted len=N sha256=xxx>，可用来判断字段是不是空的、被截断或被破坏。
+  # 当前为排查 UnknownError 临时打开，定位完请改回 false。
+  LogRequestBody: true
+
 PhoneRecharegeRpc:
   Address: tcp@localhost:6002
   Name: RechargeService

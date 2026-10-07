@@ -10,6 +10,13 @@ const (
 	PaymentTypeImplicit = "Implicit"
 )
 
+// 加密数据种类，对应 Magensa 的 dataInput.encryptedData.dataType。
+// 两种载荷的外层容器长得一样，但密钥集不同，填错会被判为无法解析。
+const (
+	DataTypeARQC          = "ARQC"          // 接触式/非接 EMV 读卡产生的 ARQC
+	DataTypeAppleTapToPay = "AppleTapToPay" // iPhone Tap to Pay 产生的载荷
+)
+
 type KeyValue struct {
 	Key   string `json:"key"`
 	Value string `json:"value"`

@@ -41,6 +41,17 @@ func postAuthor(t *testing.T, r *gin.Engine, body string) *httptest.ResponseReco
 	return w
 }
 
+func decodeAuthorResponse(t *testing.T, w *httptest.ResponseRecorder) AuthorResponse {
+	t.Helper()
+
+	var resp AuthorResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("解析响应失败: %v (body=%s)", err, w.Body.String())
+	}
+
+	return resp
+}
+
 func TestAuthorReturnsTokenForIMEI(t *testing.T) {
 	r := authorRouter(t)
 
@@ -49,9 +60,9 @@ func TestAuthorReturnsTokenForIMEI(t *testing.T) {
 		t.Fatalf("期望 200，实际 %d: %s", w.Code, w.Body.String())
 	}
 
-	var resp AuthorResponse
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("解析响应失败: %v", err)
+	resp := decodeAuthorResponse(t, w)
+	if resp.Token == "" {
+		t.Fatal("token 不能为空")
 	}
 	if resp.IMEI != testIMEI {
 		t.Fatalf("imei 期望 %s，实际 %s", testIMEI, resp.IMEI)
@@ -69,7 +80,7 @@ func TestAuthorReturnsTokenForIMEI(t *testing.T) {
 	if claims.IMEI != testIMEI {
 		t.Fatalf("token 里的 imei 期望 %s，实际 %s", testIMEI, claims.IMEI)
 	}
-	if want := time.Duration(auth.Expire) * time.Second; claims.ExpiresAt.Time.Sub(time.Now()) > want {
+	if want := time.Duration(auth.Expire) * time.Second; time.Until(claims.ExpiresAt.Time) > want {
 		t.Fatalf("token 有效期超过了配置: %v", claims.ExpiresAt.Time)
 	}
 }
@@ -82,12 +93,8 @@ func TestAuthorTrimsIMEI(t *testing.T) {
 		t.Fatalf("期望 200，实际 %d: %s", w.Code, w.Body.String())
 	}
 
-	var resp AuthorResponse
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("解析响应失败: %v", err)
-	}
-	if resp.IMEI != testIMEI {
-		t.Fatalf("imei 应去掉首尾空格，实际 %q", resp.IMEI)
+	if got := decodeAuthorResponse(t, w).IMEI; got != testIMEI {
+		t.Fatalf("imei 应去掉首尾空格，实际 %q", got)
 	}
 }
 

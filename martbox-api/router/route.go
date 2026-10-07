@@ -12,7 +12,8 @@ import (
 
 func InitRouter(router *gin.Engine) {
 	group := router.Group("/v1/transaction")
-	group.POST("/emv", v1.Emv)
+	group.POST("/emv", v1.Emv)         //支付
+	group.POST("/capture", v1.Capture) //扣款
 
 	router.POST("/author", v1.Author)
 	initWebSocket(router)

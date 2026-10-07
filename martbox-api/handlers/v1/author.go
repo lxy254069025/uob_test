@@ -27,6 +27,10 @@ type AuthorResponse struct {
 }
 
 // Author 授权：根据 imei 生成 token。
+//
+// 当前不校验 imei 是否是已登记的设备，只要格式非空就能换到 token。
+// 等 machines-rpc 能查设备表之后，这里应该补一层校验：imei 必须存在且状态正常，
+// 否则任何知道 imei 的人都能拿到 token。
 func Author(c *gin.Context) {
 	var req AuthorRequest
 	if err := c.ShouldBindJSON(&req); err != nil {

@@ -37,7 +37,7 @@ func (c *Client) EMVSale(ctx context.Context, customerTransactionID string, amou
 		},
 		DataInput: EMVDataInput{
 			EncryptedData: EncryptedData{
-				DataType: "ARQC",
+				DataType: DataTypeARQC,
 				Data:     arqc,
 			},
 			PaymentType: PaymentTypeCredit,
@@ -54,7 +54,7 @@ func (c *Client) EMVAuthorize(ctx context.Context, customerTransactionID string,
 		},
 		DataInput: EMVDataInput{
 			EncryptedData: EncryptedData{
-				DataType: "ARQC",
+				DataType: DataTypeARQC,
 				Data:     arqc,
 			},
 			PaymentType: PaymentTypeCredit,

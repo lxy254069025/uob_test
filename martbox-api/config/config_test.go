@@ -38,4 +38,8 @@ func TestHomeYamlLoads(t *testing.T) {
 	if cfg.Auth.Expire <= 0 {
 		t.Fatalf("Auth.Expire 应为正数，实际 %d", cfg.Auth.Expire)
 	}
+
+	// Unigate 段能被正确解析即可；"默认关闭"是代码里的行为保证，
+	// 由 common/unigate 的 TestRequestBodyLoggingDisabledByDefault 守着，
+	// 这里不该把运维的开关值写死。
 }

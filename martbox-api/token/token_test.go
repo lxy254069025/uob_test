@@ -48,7 +48,7 @@ func TestGenerateAndParse(t *testing.T) {
 	}
 }
 
-// 同一个 imei 每次签发的 token 都应该不同（iat/exp 有纳秒级差异），避免设备端缓存复用。
+// 同一个 imei 每次签发的 token 都应该不同（iat/exp 秒级递增），避免设备端缓存复用。
 func TestGenerateProducesDifferentTokens(t *testing.T) {
 	signer := NewSigner(testSecret, testIssuer, time.Hour)
 
