@@ -24,15 +24,15 @@ func initWebSocket(router *gin.Engine) {
 	conf := config.GetConfig().WebSocket
 
 	hub := ws.Init(ws.Options{
-		Token:          conf.Token,
-		AllowedOrigins: conf.AllowedOrigins,
-		ReadLimit:      conf.ReadLimit,
-		PingInterval:   time.Duration(conf.PingInterval) * time.Second,
-		PongTimeout:    time.Duration(conf.PongTimeout) * time.Second,
-		WriteTimeout:   time.Duration(conf.WriteTimeout) * time.Second,
-		SendBuffer:     conf.SendBuffer,
+		Token:            conf.Token,
+		AllowedOrigins:   conf.AllowedOrigins,
+		ReadLimit:        conf.ReadLimit,
+		HeartbeatTimeout: time.Duration(conf.HeartbeatTimeout) * time.Second,
+		WriteTimeout:     time.Duration(conf.WriteTimeout) * time.Second,
+		SendBuffer:       conf.SendBuffer,
 	})
 	hub.OnMessage(v1.OnMachineMessage)
+	hub.OnDisconnect(v1.OnMachineOffline)
 
 	path := conf.Path
 	if path == "" {

@@ -10,23 +10,24 @@ import (
 
 // Options 是 Hub 的运行参数，零值会被 withDefaults 补成默认值。
 type Options struct {
-	Token          string        // 非空时，连接必须带 ?token= 且一致
-	AllowedOrigins []string      // 允许的浏览器 Origin，"*" 表示不限制；为空表示只允许非浏览器客户端
-	ReadLimit      int64         // 单条上行报文大小上限，字节
-	PingInterval   time.Duration // 服务端心跳间隔
-	PongTimeout    time.Duration // 心跳响应超时，超时即断开
-	WriteTimeout   time.Duration // 单次写超时
-	SendBuffer     int           // 单连接发送队列长度
+	Token          string   // 非空时，连接必须带 ?token= 且一致
+	AllowedOrigins []string // 允许的浏览器 Origin，"*" 表示不限制；为空表示只允许非浏览器客户端
+	ReadLimit      int64    // 单条上行报文大小上限，字节
+	// HeartbeatTimeout 是"多久没收到客户端心跳就断开"。
+	// 心跳由客户端定时发 ping，服务端收到后回 pong；服务端自己不主动 ping。
+	HeartbeatTimeout time.Duration
+	WriteTimeout     time.Duration // 单次写超时
+	SendBuffer       int           // 单连接发送队列长度
 }
 
 // DefaultOptions 返回一套适合设备长连接的默认参数。
 func DefaultOptions() Options {
 	return Options{
-		ReadLimit:    16 << 10, // 16KB，设备上行报文一般很小
-		PingInterval: 30 * time.Second,
-		PongTimeout:  90 * time.Second, // 至少 2 倍心跳间隔，容忍一次丢包
-		WriteTimeout: 10 * time.Second,
-		SendBuffer:   64,
+		ReadLimit: 16 << 10, // 16KB，设备上行报文一般很小
+		// 设备通常 30s 发一次心跳，给 3 次容错。
+		HeartbeatTimeout: 90 * time.Second,
+		WriteTimeout:     10 * time.Second,
+		SendBuffer:       64,
 	}
 }
 
@@ -36,11 +37,8 @@ func (o Options) withDefaults() Options {
 	if o.ReadLimit <= 0 {
 		o.ReadLimit = d.ReadLimit
 	}
-	if o.PingInterval <= 0 {
-		o.PingInterval = d.PingInterval
-	}
-	if o.PongTimeout <= 0 {
-		o.PongTimeout = d.PongTimeout
+	if o.HeartbeatTimeout <= 0 {
+		o.HeartbeatTimeout = d.HeartbeatTimeout
 	}
 	if o.WriteTimeout <= 0 {
 		o.WriteTimeout = d.WriteTimeout
@@ -54,6 +52,9 @@ func (o Options) withDefaults() Options {
 
 // MessageHandler 处理设备上行报文，由业务方注册。
 type MessageHandler func(c *Client, msg Message)
+
+// DisconnectHandler 处理设备断线，reason 说明断开原因（心跳超时、客户端关闭、读写错误等）。
+type DisconnectHandler func(c *Client, reason string)
 
 var (
 	globalMu  sync.RWMutex
@@ -88,6 +89,9 @@ type Hub struct {
 
 	handlerMu sync.RWMutex
 	handler   MessageHandler
+
+	disconnectMu sync.RWMutex
+	onDisconnect DisconnectHandler
 }
 
 func NewHub(opts Options) *Hub {
@@ -110,6 +114,27 @@ func (h *Hub) OnMessage(handler MessageHandler) {
 	h.handlerMu.Lock()
 	h.handler = handler
 	h.handlerMu.Unlock()
+}
+
+// OnDisconnect 注册断线处理函数，设备掉线（含心跳超时）时调用。
+// 建议在设备连接之前注册。
+func (h *Hub) OnDisconnect(handler DisconnectHandler) {
+	h.disconnectMu.Lock()
+	h.onDisconnect = handler
+	h.disconnectMu.Unlock()
+}
+
+// notifyDisconnect 在连接注销之后触发断线处理。
+func (h *Hub) notifyDisconnect(c *Client, reason string) {
+	log.Printf("ws: 设备断线 sn=%s addr=%s 原因=%s", c.SN(), c.RemoteAddr(), reason)
+
+	h.disconnectMu.RLock()
+	handler := h.onDisconnect
+	h.disconnectMu.RUnlock()
+
+	if handler != nil {
+		handler(c, reason)
+	}
 }
 
 func (h *Hub) handleMessage(c *Client, msg Message) {

@@ -2,7 +2,10 @@ package ws
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"log"
+	"net"
 	"sync"
 	"time"
 
@@ -77,29 +80,44 @@ func (c *Client) enqueue(payload []byte) bool {
 	}
 }
 
-// readPump 负责读设备上行报文。退出时注销连接，保证 Hub 里不残留死连接。
+// readPump 负责读设备上行报文和心跳。
+//
+// 心跳方向：客户端定时发 ping，服务端收到后按 RFC 6455 回 pong；
+// 服务端自己不主动 ping。超过 HeartbeatTimeout 没收到客户端任何数据（含心跳）
+// 就判定掉线，断开连接并触发断线处理。
 func (c *Client) readPump() {
 	opts := c.hub.opts
+	reason := reasonClientClosed
 
 	defer func() {
 		c.hub.unregister(c)
+		c.hub.notifyDisconnect(c, reason)
 		c.close()
 	}()
 
 	c.conn.SetReadLimit(opts.ReadLimit)
-	_ = c.conn.SetReadDeadline(time.Now().Add(opts.PongTimeout))
+	c.touch()
+
+	// 客户端的心跳：回 pong，并借这次心跳刷新读超时。
+	c.conn.SetPingHandler(func(appData string) error {
+		c.touch()
+		return c.conn.WriteControl(websocket.PongMessage, []byte(appData), time.Now().Add(opts.WriteTimeout))
+	})
+	// 兼容仍然发 pong 的客户端：pong 同样算活着。
 	c.conn.SetPongHandler(func(string) error {
-		return c.conn.SetReadDeadline(time.Now().Add(opts.PongTimeout))
+		c.touch()
+		return nil
 	})
 
 	for {
 		_, payload, err := c.conn.ReadMessage()
 		if err != nil {
-			if websocket.IsUnexpectedCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
-				log.Printf("ws: sn=%s addr=%s 连接异常关闭: %v", c.SN(), c.remoteAddr, err)
-			}
+			reason = classifyDisconnect(err, opts.HeartbeatTimeout)
 			return
 		}
+
+		// 有业务数据上来同样说明设备还活着。
+		c.touch()
 
 		var msg Message
 		if err := json.Unmarshal(payload, &msg); err != nil {
@@ -116,33 +134,42 @@ func (c *Client) readPump() {
 	}
 }
 
+const reasonClientClosed = "客户端主动关闭"
+
+// touch 刷新读超时，表示刚刚收到过数据或心跳。
+func (c *Client) touch() {
+	_ = c.conn.SetReadDeadline(time.Now().Add(c.hub.opts.HeartbeatTimeout))
+}
+
+// classifyDisconnect 把读错误翻译成断线原因，便于日志和业务侧判断。
+func classifyDisconnect(err error, heartbeatTimeout time.Duration) string {
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return fmt.Sprintf("心跳超时（%v 内未收到客户端心跳）", heartbeatTimeout)
+	}
+	if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
+		return reasonClientClosed
+	}
+
+	return err.Error()
+}
+
 // writePump 负责下发数据和心跳。所有写操作都集中在这里，避免并发写同一个连接。
 func (c *Client) writePump() {
 	opts := c.hub.opts
-	ticker := time.NewTicker(opts.PingInterval)
 
-	defer func() {
-		ticker.Stop()
-		c.close()
-	}()
+	defer c.close()
 
 	for {
-		select {
-		case payload, ok := <-c.send:
-			_ = c.conn.SetWriteDeadline(time.Now().Add(opts.WriteTimeout))
-			if !ok {
-				_ = c.conn.WriteMessage(websocket.CloseMessage, []byte{})
-				return
-			}
+		payload, ok := <-c.send
+		_ = c.conn.SetWriteDeadline(time.Now().Add(opts.WriteTimeout))
+		if !ok {
+			_ = c.conn.WriteMessage(websocket.CloseMessage, []byte{})
+			return
+		}
 
-			if err := c.conn.WriteMessage(websocket.TextMessage, payload); err != nil {
-				return
-			}
-		case <-ticker.C:
-			_ = c.conn.SetWriteDeadline(time.Now().Add(opts.WriteTimeout))
-			if err := c.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
-				return
-			}
+		if err := c.conn.WriteMessage(websocket.TextMessage, payload); err != nil {
+			return
 		}
 	}
 }

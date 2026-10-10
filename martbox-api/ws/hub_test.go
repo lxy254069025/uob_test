@@ -315,19 +315,141 @@ func TestOptionsWithDefaults(t *testing.T) {
 	want := DefaultOptions()
 
 	if got.ReadLimit != want.ReadLimit ||
-		got.PingInterval != want.PingInterval ||
-		got.PongTimeout != want.PongTimeout ||
+		got.HeartbeatTimeout != want.HeartbeatTimeout ||
 		got.WriteTimeout != want.WriteTimeout ||
 		got.SendBuffer != want.SendBuffer {
 		t.Fatalf("零值参数应补成默认值，期望 %+v，实际 %+v", want, got)
 	}
 
-	custom := Options{PingInterval: time.Second, SendBuffer: 8}.withDefaults()
-	if custom.PingInterval != time.Second || custom.SendBuffer != 8 {
+	custom := Options{HeartbeatTimeout: time.Second, SendBuffer: 8}.withDefaults()
+	if custom.HeartbeatTimeout != time.Second || custom.SendBuffer != 8 {
 		t.Fatalf("自定义参数不应被覆盖: %+v", custom)
 	}
-	if custom.ReadLimit != want.ReadLimit || custom.PongTimeout != want.PongTimeout {
+	if custom.ReadLimit != want.ReadLimit || custom.WriteTimeout != want.WriteTimeout {
 		t.Fatalf("未设置的参数应补默认值: %+v", custom)
+	}
+}
+
+// startReading 在后台持续读，负责处理控制帧。
+// net.Pipe 是同步的：测试端不读，服务端写 pong 就会阻塞住 readPump。
+func startReading(conn *websocket.Conn) {
+	go func() {
+		for {
+			if _, _, err := conn.ReadMessage(); err != nil {
+				return
+			}
+		}
+	}()
+}
+
+// 心跳方向：客户端发 ping，服务端必须回同样载荷的 pong。
+// 载荷是可选的，空帧同样合法（RFC 6455 §5.5.2）。
+func TestClientPingGetsPong(t *testing.T) {
+	cases := map[string]string{
+		"带载荷": "hb-1",
+		"空帧":  "",
+	}
+
+	for name, payload := range cases {
+		t.Run(name, func(t *testing.T) {
+			env := newTestEnv(t, Options{})
+
+			conn, _, err := env.l.dial("sn="+testSN, nil)
+			if err != nil {
+				t.Fatalf("连接失败: %v", err)
+			}
+			defer conn.Close()
+
+			pongs := make(chan string, 1)
+			conn.SetPongHandler(func(appData string) error {
+				pongs <- appData
+				return nil
+			})
+			startReading(conn)
+
+			if err := conn.WriteControl(websocket.PingMessage, []byte(payload), time.Now().Add(time.Second)); err != nil {
+				t.Fatalf("发送心跳失败: %v", err)
+			}
+
+			select {
+			case got := <-pongs:
+				if got != payload {
+					t.Fatalf("pong 应带回 ping 的载荷 %q，实际 %q", payload, got)
+				}
+			case <-time.After(2 * time.Second):
+				t.Fatal("客户端发了 ping，服务端没有回 pong")
+			}
+
+			if !env.hub.IsOnline(testSN) {
+				t.Fatal("收到心跳后设备应保持在线")
+			}
+		})
+	}
+}
+
+// 一段时间收不到客户端心跳就断线，并触发断线处理。
+func TestHeartbeatTimeoutTriggersDisconnect(t *testing.T) {
+	env := newTestEnv(t, Options{HeartbeatTimeout: 200 * time.Millisecond})
+
+	reasons := make(chan string, 1)
+	env.hub.OnDisconnect(func(_ *Client, reason string) { reasons <- reason })
+
+	conn, _, err := env.l.dial("sn="+testSN, nil)
+	if err != nil {
+		t.Fatalf("连接失败: %v", err)
+	}
+	defer conn.Close()
+
+	if !waitFor(t, 2*time.Second, func() bool { return env.hub.IsOnline(testSN) }) {
+		t.Fatal("连接建立后设备应处于在线状态")
+	}
+
+	select {
+	case reason := <-reasons:
+		if !strings.Contains(reason, "心跳超时") {
+			t.Fatalf("断线原因应说明心跳超时，实际 %q", reason)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("超过心跳超时后应触发断线处理")
+	}
+
+	if env.hub.IsOnline(testSN) {
+		t.Fatal("断线处理后设备应下线")
+	}
+}
+
+// 只要客户端持续发心跳，连接就不该被断掉。
+func TestHeartbeatKeepsConnectionAlive(t *testing.T) {
+	env := newTestEnv(t, Options{HeartbeatTimeout: 500 * time.Millisecond})
+
+	reasons := make(chan string, 1)
+	env.hub.OnDisconnect(func(_ *Client, reason string) { reasons <- reason })
+
+	conn, _, err := env.l.dial("sn="+testSN, nil)
+	if err != nil {
+		t.Fatalf("连接失败: %v", err)
+	}
+	defer conn.Close()
+	startReading(conn)
+
+	// 100ms 一次心跳，持续 1.2s，明显长于 500ms 的超时。
+	deadline := time.Now().Add(1200 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		if err := conn.WriteControl(websocket.PingMessage, []byte("hb"), time.Now().Add(time.Second)); err != nil {
+			t.Fatalf("发送心跳失败: %v", err)
+		}
+
+		time.Sleep(100 * time.Millisecond)
+
+		select {
+		case reason := <-reasons:
+			t.Fatalf("有心跳时不该断线，实际原因 %q", reason)
+		default:
+		}
+	}
+
+	if !env.hub.IsOnline(testSN) {
+		t.Fatal("持续发心跳的连接应保持在线")
 	}
 }
 

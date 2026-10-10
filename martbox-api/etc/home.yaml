@@ -6,8 +6,7 @@ WebSocket:
   Path: /v1/ws
   Token: ""            # 非空时，设备连接需带 ?token=xxx
   AllowedOrigins: []   # 浏览器来源白名单，例如 https://admin.example.com；设备端不带 Origin，直接放行
-  PingInterval: 30     # 秒，服务端心跳间隔
-  PongTimeout: 90      # 秒，超过该时间没收到 pong 就断开
+  HeartbeatTimeout: 90 # 秒，超过该时间没收到客户端心跳（ping）就断开，并触发断线处理
   WriteTimeout: 10     # 秒，单次写超时
   ReadLimit: 16384     # 字节，单条上行报文上限
   SendBuffer: 64       # 单连接发送队列长度

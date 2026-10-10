@@ -19,7 +19,7 @@ func TestHomeYamlLoads(t *testing.T) {
 	if cfg.WebSocket.Path != "/v1/ws" {
 		t.Fatalf("WebSocket.Path 期望 /v1/ws，实际 %q", cfg.WebSocket.Path)
 	}
-	if cfg.WebSocket.PingInterval != 30 || cfg.WebSocket.PongTimeout != 90 {
+	if cfg.WebSocket.HeartbeatTimeout != 90 {
 		t.Fatalf("WebSocket 心跳配置不符合预期: %+v", cfg.WebSocket)
 	}
 	if cfg.WebSocket.ReadLimit != 16384 || cfg.WebSocket.SendBuffer != 64 {

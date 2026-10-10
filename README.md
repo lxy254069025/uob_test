@@ -139,5 +139,16 @@ POST /v1/ws/push
 ```
 
 握手行为：设备端（不带 `Origin`）直接放行；浏览器来源必须在 `WebSocket.AllowedOrigins` 白名单里。
-心跳由服务端发起 ping，`PongTimeout` 内没收到 pong 就断开并下线。
+
+心跳与断线：**心跳由客户端发起**，设备定时发 ping，服务端收到后回同样的 pong；
+超过 `WebSocket.HeartbeatTimeout` 秒没收到客户端任何数据（心跳或业务报文）就判定掉线，
+断开连接、从在线列表移除，并触发断线处理 `hub.OnDisconnect`（目前接到
+`v1.OnMachineOffline`，后续可在这里把设备标记为离线）。
+超时原因会写进日志：
+
+```
+ws: 设备断线 sn=SN-0001 addr=1.2.3.4:5678 原因=心跳超时（1m30s 内未收到客户端心跳）
+```
+
+客户端如果习惯用 pong 而不是 ping 做心跳也能用——服务端把 pong 同样当作存活信号。
 # uob_test
