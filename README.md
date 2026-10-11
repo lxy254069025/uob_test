@@ -128,8 +128,25 @@ ARQC、磁道、KSN、卡号、CVV 这些字段只打印长度和截断的 SHA-2
 {"type":"command","sn":"SN-0001","id":"msg-1","data":{"action":"drop"},"ts":1759000000000}
 ```
 
-`type` 取值：`register`（设备注册，可在这条报文里补 sn）、`event`（设备事件上报）、
-`ack`（指令回执，用 `id` 关联原消息）、`command`（服务端下发指令）、`error`（服务端报错）。
+`type` 取值：`register`（设备注册，可在这条报文里补 sn）、`status`（定时上报状态，兼作
+应用层心跳）、`event`（设备事件上报）、`ack`（指令回执，用 `id` 关联原消息）、
+`command`（服务端下发指令）、`error`（服务端报错）。
+
+设备定时上报的状态报文长这样（服务端按 `sn` 保存最近一次，供后续查询/落库）：
+
+```json
+{"type":"status","sn":"martbox-dev-0001","ts":1728000000000,
+ "data":{"battery":80,"volume":5,"networkType":"wifi","temperature":"","hardwareAvailable":true,
+         "devices":[{"module":"lock","online":true,"busy":false,"doorOpen":false,"lockOpen":false},
+                    {"module":"camera","online":true,"busy":false},
+                    {"module":"pos","online":true,"busy":false},
+                    {"module":"temperature","online":false,"busy":false}]}}
+```
+
+`doorOpen` / `lockOpen` 只有锁模块才有，所以内部用指针区分"没上报"和"明确为 false"。
+`temperature` 用 `StringOrNumber` 接收：样例给的是空字符串，但设备直接发数字（`26.5`）
+也能解析——否则类型不匹配会让**整份状态**解析失败。
+模块有离线的会单独打一条告警日志。
 
 服务端下发指令除了在业务代码里调用 `ws.Default().Send(sn, msg)`，也可以走 HTTP：
 
@@ -140,8 +157,8 @@ POST /v1/ws/push
 
 握手行为：设备端（不带 `Origin`）直接放行；浏览器来源必须在 `WebSocket.AllowedOrigins` 白名单里。
 
-心跳与断线：**心跳由客户端发起**，设备定时发 ping，服务端收到后回同样的 pong；
-超过 `WebSocket.HeartbeatTimeout` 秒没收到客户端任何数据（心跳或业务报文）就判定掉线，
+心跳与断线：**心跳是应用层的 status 报文**，设备定时上报状态，服务端收到就知道它还活着；
+超过 `WebSocket.HeartbeatTimeout` 秒没收到客户端任何数据（status 或其它业务报文）就判定掉线，
 断开连接、从在线列表移除，并触发断线处理 `hub.OnDisconnect`（目前接到
 `v1.OnMachineOffline`，后续可在这里把设备标记为离线）。
 超时原因会写进日志：
@@ -150,5 +167,6 @@ POST /v1/ws/push
 ws: 设备断线 sn=SN-0001 addr=1.2.3.4:5678 原因=心跳超时（1m30s 内未收到客户端心跳）
 ```
 
-客户端如果习惯用 pong 而不是 ping 做心跳也能用——服务端把 pong 同样当作存活信号。
+协议层的 ping/pong 仍然兼容（收到 ping 照旧回 pong，收到 pong 也算存活），
+所以客户端用哪种方式探活都不会被误判掉线。
 # uob_test

@@ -9,6 +9,7 @@ import (
 // 设备端按 type 分发即可，新增类型不会影响旧客户端。
 const (
 	TypeRegister = "register" // 设备上行：注册，data 里可以带设备信息
+	TypeStatus   = "status"   // 设备上行：定时上报状态，兼作应用层心跳
 	TypeEvent    = "event"    // 设备上行：事件上报（出货、故障、投币等）
 	TypeAck      = "ack"      // 双向：某条消息的回执，用 id 关联原消息
 	TypeCommand  = "command"  // 服务端下行：指令（出货、重启、改配置等）
