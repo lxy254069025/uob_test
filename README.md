@@ -154,10 +154,16 @@ Go 侧交易调用需要 `CGO_ENABLED=1`。`CGO_ENABLED=0` 时包可以编译，
 Go 不会读取 Makefile 的 `CC`。构建 Linux amd64 服务时必须同时指定 musl 编译器：
 
 ```sh
-CGO_ENABLED=1 GOOS=linux GOARCH=amd64 \
-  CC=x86_64-unknown-linux-musl-gcc \
-  go build ./martbox-api
+make -C martbox-api build-linux-amd64
 ```
+
+该目标先生成 `common/unigate/lib/linux_amd64/libunigate.a`，再以
+`CGO_ENABLED=1` 和 `x86_64-unknown-linux-musl-gcc` 生成完全静态的
+`martbox-api/bin/martbox-api-linux-amd64`，构建结束会校验二进制元数据中的
+`CGO_ENABLED=1`。
+
+如果服务器没有系统 CA 包，需要安装 `ca-certificates`，或通过
+`UNIGATE_CA_BUNDLE` 指向随部署文件提供的 PEM CA 包。
 
 `POST /v1/transaction/emv`（授权）和 `POST /v1/transaction/capture`（追加授权 + 扣款）
 调 Magensa Unigate。上游返回非 2xx 时，C SDK 会解析 Magensa 的 fault 结构，
