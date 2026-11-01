@@ -1,3 +1,5 @@
+//go:build cgo && (darwin || linux) && (amd64 || arm64)
+
 package unigate
 
 import (
@@ -11,7 +13,7 @@ func TestRedactSensitiveMasksNestedARQC(t *testing.T) {
 	raw := []byte(`{"customerTransactionID":"order-1",` +
 		`"dataInput":{"encryptedData":{"dataType":"ARQC","data":"SECRET-ARQC-VALUE"},"paymentType":"Credit"}}`)
 
-	got := RedactSensitive(raw)
+	got := RedactJSON(raw)
 
 	if strings.Contains(got, "SECRET-ARQC-VALUE") {
 		t.Fatalf("ARQC 原文不应出现在日志里: %s", got)
@@ -33,7 +35,7 @@ func TestRedactSensitiveMasksNestedARQC(t *testing.T) {
 
 // 空值原样保留，这样一眼能看出"字段没传值"。
 func TestRedactSensitiveKeepsEmptyValues(t *testing.T) {
-	got := RedactSensitive([]byte(`{"encryptedData":{"data":""}}`))
+	got := RedactJSON([]byte(`{"encryptedData":{"data":""}}`))
 	if !strings.Contains(got, `"data":""`) {
 		t.Fatalf("空值应原样保留，实际 %s", got)
 	}
@@ -43,7 +45,7 @@ func TestRedactSensitiveMasksCardFields(t *testing.T) {
 	raw := []byte(`{"encryptedCardSwipe":{"track1":"T1SECRET","track2":"T2SECRET","magnePrint":"MP","ksn":"KSN001"},` +
 		`"manualEntryInput":{"pan":"4111111111111111","cvv":"123"}}`)
 
-	got := RedactSensitive(raw)
+	got := RedactJSON(raw)
 
 	for _, secret := range []string{"T1SECRET", "T2SECRET", "MP", "KSN001", "4111111111111111", `"123"`} {
 		if strings.Contains(got, secret) {
@@ -53,7 +55,7 @@ func TestRedactSensitiveMasksCardFields(t *testing.T) {
 }
 
 func TestRedactSensitiveHandlesArrays(t *testing.T) {
-	got := RedactSensitive([]byte(`{"entries":[{"track2":"T2SECRET"},{"track2":""}]}`))
+	got := RedactJSON([]byte(`{"entries":[{"track2":"T2SECRET"},{"track2":""}]}`))
 
 	if strings.Contains(got, "T2SECRET") {
 		t.Fatalf("数组里的敏感值也要脱敏: %s", got)
@@ -65,9 +67,9 @@ func TestRedactSensitiveHandlesArrays(t *testing.T) {
 
 // 长度相同但内容被破坏（例如 base64 的 + 变成空格）时，只能靠指纹发现。
 func TestRedactSensitiveFingerprintDetectsSameLengthChange(t *testing.T) {
-	original := RedactSensitive([]byte(`{"encryptedData":{"data":"abc+def"}}`))
-	sameContent := RedactSensitive([]byte(`{"encryptedData":{"data":"abc+def"}}`))
-	corrupted := RedactSensitive([]byte(`{"encryptedData":{"data":"abc def"}}`))
+	original := RedactJSON([]byte(`{"encryptedData":{"data":"abc+def"}}`))
+	sameContent := RedactJSON([]byte(`{"encryptedData":{"data":"abc+def"}}`))
+	corrupted := RedactJSON([]byte(`{"encryptedData":{"data":"abc def"}}`))
 
 	if original != sameContent {
 		t.Fatalf("同样的内容应给出同样的指纹: %s vs %s", original, sameContent)
@@ -82,7 +84,7 @@ func TestRedactSensitiveFingerprintDetectsSameLengthChange(t *testing.T) {
 
 // 解析不了的报文不要冒险打印原文。
 func TestRedactSensitiveRejectsNonJSON(t *testing.T) {
-	if got := RedactSensitive([]byte("<html>bank error</html>")); got != "<not-json>" {
+	if got := RedactJSON([]byte("<html>bank error</html>")); got != "<not-json>" {
 		t.Fatalf("非 JSON 应返回占位符，实际 %s", got)
 	}
 }

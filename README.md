@@ -5,13 +5,19 @@
 │   │   └── config.go
 │   ├── go.mod
 │   ├── go.sum
-│   └── unigate     //magtek SDK
-│       ├── appletaptopay.go
-│       ├── client.go
-│       ├── redact.go
-│       ├── reference_transaction.go
-│       ├── transaction.go
-│       └── types.go
+│   └── unigate     // Magensa C SDK + Go FFI
+│       ├── types.go            // C/Go 共用的公开类型
+│       ├── binding.go          // 当前 GOOS/GOARCH 的 cgo 绑定
+│       ├── binding_nocgo.go    // CGO_ENABLED=0 的明确错误实现
+│       ├── binding_test.go
+│       ├── unigate.h           // 可移植 C API
+│       ├── Makefile            // 按 GOOS/GOARCH 生成静态库
+│       ├── c/                  // Unigate C 实现
+│       ├── weblite/            // HTTP 源码
+│       ├── mbedtls/            // TLS 源码和许可证
+│       ├── cjson/              // JSON 源码和许可证
+│       └── lib/<goos>_<goarch>/
+│           └── libunigate.a
 ├── go.work
 ├── go.work.sum
 ├── martbox-api     // 自动售卖机接口
@@ -75,9 +81,87 @@ imei 为空或请求体不是合法 JSON 返回 400；签发失败（例如没�
 
 ## Magensa 交易接口
 
+### C 实现与嵌入式依赖
+
+`common/unigate` 是一个可独立使用的 C SDK。所有 Unigate 操作、接口路径、查询参数、
+请求 JSON、HTTP/TLS、响应读取、fault 解析和敏感字段脱敏都由 C 实现。Go 文件只负责
+cgo 结构映射，原有的 `Client`、交易请求类型和交易方法已经删除。
+
+完整字段说明、全部操作和 C/Go 示例见
+[common/unigate/README.md](common/unigate/README.md)。
+
+依赖全部以源码形式随项目编译，不链接系统 OpenSSL、libcurl 或其他本机 SSL：
+
+- HTTP/1.1：[weblite](common/unigate/weblite/weblite.c)
+- TLS：[mbedTLS 3.6.4](common/unigate/mbedtls/LICENSE)，仅启用 TLS 1.2
+  客户端、X.509、ECDHE/RSA、AES-GCM/CCM 和 ChaCha20-Poly1305
+- JSON：[cJSON 1.7.18](common/unigate/cjson/LICENSE)
+- 第三方版本、用途和许可证：[THIRD_PARTY_NOTICES.md](common/unigate/THIRD_PARTY_NOTICES.md)
+
+构建静态库：
+
+```sh
+cd common/unigate
+make
+make test
+```
+
+构建产物按目标隔离，例如 `common/unigate/lib/darwin_arm64/libunigate.a`，
+公开头文件是 `common/unigate/unigate.h`。其他 C/C++、Rust、Swift 等语言可以链接
+对应目标的静态库；Linux 链接参数需要包含 `-pthread`。Linux amd64 默认使用
+`x86_64-unknown-linux-musl-gcc` 及其对应的 `ar`、`ranlib`：
+
+```sh
+make GOOS=linux GOARCH=amd64
+```
+
+C 调用示例：
+
+```c
+unigate_client_options options = {
+    .customer_code = "customer",
+    .user_name = "user",
+    .password = "password",
+    .timeout_ms = 30000,
+};
+unigate_request request = {
+    .operation = UNIGATE_OP_EMV,
+    .customer_transaction_id = "order-1",
+    .transaction_type = "AUTHORIZE",
+    .amount = 100,
+    .data_type = "ARQC",
+    .data = "<ARQC>",
+    .payment_type = "Credit",
+};
+unigate_response response;
+int rc = unigate_execute_request(&options, &request, &response);
+/* rc == 0 时 response.body 是 Magensa 返回的 JSON。 */
+unigate_response_free(&response);
+```
+
+Go 包通过 cgo 链接当前 `GOOS/GOARCH` 对应的 `libunigate.a`，不会再直接编译 C 源码。
+因此首次构建或修改 C 代码后，先用相同的 `GOOS/GOARCH` 执行 `make`，再执行 Go 构建
+或测试。静态库支持 `darwin/linux` 的 `amd64/arm64`。
+
+TLS 默认校验证书和主机名。可用 `unigate.ClientOptions.CAPath` 指定 CA 证书包，或设置
+`UNIGATE_CA_BUNDLE`；未指定时会尝试常见系统证书路径。嵌入式部署建议随固件明确
+配置 CA 文件，并确保系统时钟正确，否则证书有效期校验会失败。
+
+Go 侧交易调用需要 `CGO_ENABLED=1`。`CGO_ENABLED=0` 时包可以编译，但 `Execute`
+会返回明确的不可用错误。运行时不需要额外安装 HTTP、JSON 或 SSL 动态库；Linux
+构建只需要 libc 和 pthread。
+
+Go 不会读取 Makefile 的 `CC`。构建 Linux amd64 服务时必须同时指定 musl 编译器：
+
+```sh
+CGO_ENABLED=1 GOOS=linux GOARCH=amd64 \
+  CC=x86_64-unknown-linux-musl-gcc \
+  go build ./martbox-api
+```
+
 `POST /v1/transaction/emv`（授权）和 `POST /v1/transaction/capture`（追加授权 + 扣款）
-调 Magensa Unigate。上游返回非 2xx 时，`unigate.APIError` 会解析 Magensa 的 fault 结构，
-把 `code` / `message` / `traceID` 单独带出来，不再是整坨 JSON：
+调 Magensa Unigate。上游返回非 2xx 时，C SDK 会解析 Magensa 的 fault 结构，
+并在 `unigate_response` / `unigate.Response` 中提供 `code` / `message` / `traceID`：
 
 ```
 POST /v1/transaction/emv

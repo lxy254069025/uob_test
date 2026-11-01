@@ -1,74 +1,94 @@
 package unigate
 
-const (
-	TxnTypeSale      = "SALE"      //直接消费
-	TxnTypeAuthorize = "AUTHORIZE" //预授权交易
-)
+import "time"
+
+const defaultTimeout = 30 * time.Second
+
+// Operation mirrors unigate_operation in unigate.h.
+type Operation int
 
 const (
-	PaymentTypeCredit   = "Credit"
-	PaymentTypeImplicit = "Implicit"
+	OperationEMV Operation = iota + 1
+	OperationToken
+	OperationCardSwipe
+	OperationKeypad
+	OperationManual
+	OperationInAppApplePay
+	OperationTECApplePay
+	OperationGooglePay
+	OperationIncrementalAuthorize
+	OperationTipAdjust
+	OperationCapture
+	OperationRefund
+	OperationVoid
+	OperationGetByMagTranID
+	OperationGetByCustomerTranID
+	OperationAppleTapToPayReader
 )
 
-// 加密数据种类，对应 Magensa 的 dataInput.encryptedData.dataType。
-// 两种载荷的外层容器长得一样，但密钥集不同，填错会被判为无法解析。
-const (
-	DataTypeARQC          = "ARQC"          // 接触式/非接 EMV 读卡产生的 ARQC
-	DataTypeAppleTapToPay = "AppleTapToPay" // iPhone Tap to Pay 产生的载荷
-)
+// ClientOptions mirrors unigate_client_options in unigate.h.
+type ClientOptions struct {
+	BaseURL        string
+	CustomerCode   string
+	UserName       string
+	Password       string
+	CAPath         string
+	Timeout        time.Duration
+	LogRequestBody bool
+}
 
+// KeyValue mirrors unigate_key_value in unigate.h.
 type KeyValue struct {
-	Key   string `json:"key"`
-	Value string `json:"value"`
+	Key   string
+	Value string
 }
 
-type TransactionInput struct {
-	TransactionType string  `json:"transactionType"`
-	Amount          float64 `json:"amount"`
+// Request mirrors unigate_request in unigate.h.
+type Request struct {
+	Operation                Operation
+	CustomerTransactionID    string
+	TransactionType          string
+	Amount                   float64
+	DataType                 string
+	Data                     string
+	PaymentType              string
+	Token                    string
+	Track1                   string
+	Track2                   string
+	Track3                   string
+	MagnePrint               string
+	MagnePrintStatus         string
+	KSN                      string
+	KeyVariant               string
+	CVV                      string
+	Zip                      string
+	IsFallback               string
+	AddressLine1             string
+	AddressLine2             string
+	City                     string
+	State                    string
+	Country                  string
+	NameOnCard               string
+	PAN                      string
+	ExpirationDate           string
+	ApplePayToken            string
+	GooglePayToken           string
+	ReferenceMagTranID       string
+	TipAmount                float64
+	HasAmount                bool
+	TransactionInputDetails  []KeyValue
+	MagTranID                string
+	CustomerTransactionQuery string
+	ReaderIdentifier         string
 }
 
-type TransactionOutput struct {
-	TransactionID               string                 `json:"transactionID"`
-	IsTransactionApproved       bool                   `json:"isTransactionApproved"`
-	TransactionStatus           string                 `json:"transactionStatus"`
-	TransactionMessage          string                 `json:"transactionMessage"`
-	AuthCode                    string                 `json:"authCode"`
-	AuthorizedAmount            float64                `json:"authorizedAmount"`
-	ProcessorConvertedResponse  map[string]interface{} `json:"processorConvertedResponse"`
-	ProcessorNormalizedResponse map[string]interface{} `json:"processorNormalizedResponse"`
-	AVSResult                   string                 `json:"avsResult"`
-	CVVResult                   *string                `json:"cvvResult"`
-	IssuerAuthenticationData    string                 `json:"issuerAuthenticationData"`
-	IssuerScriptTemplate1       string                 `json:"issuerScriptTemplate1"`
-	IssuerScriptTemplate2       string                 `json:"issuerScriptTemplate2"`
-	Token                       string                 `json:"token"`
-	TransactionOutputDetails    []KeyValue             `json:"transactionOutputDetails"`
-}
-
-type TransactionResponse struct {
-	DataOutput              DataOutput        `json:"dataOutput"`
-	TraceID                 string            `json:"traceID"`
-	MagTranID               string            `json:"magTranID"`
-	CustomerTransactionID   string            `json:"customerTransactionID"`
-	TransactionUTCTimeStamp string            `json:"transactionUTCTimeStamp"`
-	TransactionOutput       TransactionOutput `json:"transactionOutput"`
-	AdditionalResponseData  interface{}       `json:"additionalResponseData"`
-	Error                   string            `json:"error"`
-}
-
-type DataOutput struct {
-	CardID               string     `json:"cardId"`
-	PanLast4             string     `json:"panLast4"`
-	IsReplay             bool       `json:"isReplay"`
-	AdditionalOutputData []KeyValue `json:"additionalOutputData"`
-}
-
-func (o TransactionOutput) NormalizedField(key string) string {
-	if o.ProcessorNormalizedResponse == nil {
-		return ""
-	}
-	if v, ok := o.ProcessorNormalizedResponse[key].(string); ok {
-		return v
-	}
-	return ""
+// Response mirrors the public fields of unigate_response in unigate.h.
+type Response struct {
+	StatusCode   int
+	Method       string
+	Path         string
+	Body         []byte
+	FaultCode    string
+	FaultMessage string
+	FaultTraceID string
 }

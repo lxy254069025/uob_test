@@ -2,7 +2,6 @@ package v1
 
 import (
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -35,15 +34,14 @@ func decodeBody(t *testing.T, w *httptest.ResponseRecorder) map[string]string {
 	return body
 }
 
-// Magensa 的 4xx 说明我们送上去的数据有问题，对设备来说就是请求错误。
 func TestRespondUnigateErrorMapsUpstream4xxToBadRequest(t *testing.T) {
 	g, w := newTestContext(t)
 
-	respondUnigateError(g, &unigate.APIError{
-		StatusCode: http.StatusBadRequest,
-		Code:       "InvalidPaymentMode",
-		Message:    "PaymentMode is not supported - Invalid value [] for tag DFDF52 in ARQC",
-		TraceID:    "c1d35cdb-0a36-4571-9d7c-83464fd468fe",
+	respondUnigateError(g, &unigate.Response{
+		StatusCode:   http.StatusBadRequest,
+		FaultCode:    "InvalidPaymentMode",
+		FaultMessage: "PaymentMode is not supported - Invalid value [] for tag DFDF52 in ARQC",
+		FaultTraceID: "c1d35cdb-0a36-4571-9d7c-83464fd468fe",
 	})
 
 	if w.Code != http.StatusBadRequest {
@@ -61,14 +59,13 @@ func TestRespondUnigateErrorMapsUpstream4xxToBadRequest(t *testing.T) {
 	}
 }
 
-// 上游 5xx 是对方故障，对我们来说就是 502。
 func TestRespondUnigateErrorMapsUpstream5xxToBadGateway(t *testing.T) {
 	g, w := newTestContext(t)
 
-	respondUnigateError(g, &unigate.APIError{
-		StatusCode: http.StatusInternalServerError,
-		Code:       "UnknownError",
-		TraceID:    "ad525361-a643-4fbc-981a-5117b3279b19",
+	respondUnigateError(g, &unigate.Response{
+		StatusCode:   http.StatusInternalServerError,
+		FaultCode:    "UnknownError",
+		FaultTraceID: "ad525361-a643-4fbc-981a-5117b3279b19",
 	})
 
 	if w.Code != http.StatusBadGateway {
@@ -79,68 +76,51 @@ func TestRespondUnigateErrorMapsUpstream5xxToBadGateway(t *testing.T) {
 	}
 }
 
-func TestRespondUnigateErrorHandlesPlainError(t *testing.T) {
-	g, w := newTestContext(t)
-
-	respondUnigateError(g, errors.New("unigate: sending request: dial tcp: timeout"))
-
-	if w.Code != http.StatusBadGateway {
-		t.Fatalf("期望 502，实际 %d", w.Code)
-	}
-	if body := decodeBody(t, w); body["error"] != "upstream_error" {
-		t.Fatalf("非 APIError 应回落到 upstream_error，实际 %q", body["error"])
-	}
-}
-
-// 请求只带 paymentType 和 data：EMV 授权方法的报文格式由自己组装。
+// 请求只带 paymentType 和 data；EMV 授权格式由 C SDK 根据 operation 生成。
 func TestEmvAuthorizeRequestFormat(t *testing.T) {
 	got := emvAuthorizeRequest("order-1", "", "card-data")
 
-	if got.DataInput.EncryptedData.DataType != unigate.DataTypeARQC {
-		t.Fatalf("EMV 授权方法的 dataType 应固定为 ARQC，实际 %q", got.DataInput.EncryptedData.DataType)
+	if got.Operation != unigate.OperationEMV {
+		t.Fatalf("operation 应为 EMV，实际 %d", got.Operation)
 	}
-	if got.TransactionInput.TransactionType != unigate.TxnTypeAuthorize {
-		t.Fatalf("transactionType 应为 AUTHORIZE，实际 %q", got.TransactionInput.TransactionType)
+	if got.DataType != dataTypeARQC {
+		t.Fatalf("dataType 应固定为 ARQC，实际 %q", got.DataType)
 	}
-	if got.TransactionInput.Amount != emvAuthorizeAmount {
-		t.Fatalf("金额应由方法自己决定，期望 %v，实际 %v", emvAuthorizeAmount, got.TransactionInput.Amount)
+	if got.TransactionType != txnTypeAuthorize {
+		t.Fatalf("transactionType 应为 AUTHORIZE，实际 %q", got.TransactionType)
 	}
-	if got.DataInput.PaymentType != unigate.PaymentTypeCredit {
-		t.Fatalf("paymentType 默认应为 Credit，实际 %q", got.DataInput.PaymentType)
+	if got.Amount != emvAuthorizeAmount {
+		t.Fatalf("金额应由方法自己决定，期望 %v，实际 %v", emvAuthorizeAmount, got.Amount)
 	}
-	if got.DataInput.EncryptedData.Data != "card-data" {
-		t.Fatalf("data 应原样带上: %+v", got)
+	if got.PaymentType != paymentCredit {
+		t.Fatalf("paymentType 默认应为 Credit，实际 %q", got.PaymentType)
 	}
-	if got.CustomerTransactionID != "order-1" {
-		t.Fatalf("customerTransactionID 没带上: %+v", got)
+	if got.Data != "card-data" || got.CustomerTransactionID != "order-1" {
+		t.Fatalf("请求字段不正确: %+v", got)
 	}
 }
 
 func TestEmvAuthorizeRequestPassesPaymentType(t *testing.T) {
 	got := emvAuthorizeRequest("order-1", "  Debit  ", "card-data")
-
-	if got.DataInput.PaymentType != "Debit" {
-		t.Fatalf("paymentType 应原样透传并去掉空格，实际 %q", got.DataInput.PaymentType)
+	if got.PaymentType != "Debit" {
+		t.Fatalf("paymentType 应去掉空格后透传，实际 %q", got.PaymentType)
 	}
 }
 
 // 重放意味着这笔没有真的发起新授权，必须能识别出来。
 func TestReplayNotice(t *testing.T) {
 	if notice, ok := replayNotice(nil); ok || notice != "" {
-		t.Fatalf("nil 响应不该报重放: %q", notice)
+		t.Fatalf("空响应不该报重放: %q", notice)
 	}
 
-	normal := &unigate.TransactionResponse{MagTranID: "m1"}
+	normal := []byte(`{"magTranID":"m1"}`)
 	if notice, ok := replayNotice(normal); ok {
 		t.Fatalf("正常交易不该报重放: %q", notice)
 	}
 
-	replayed := &unigate.TransactionResponse{
-		MagTranID:             "m2",
-		CustomerTransactionID: "cst-ar-735",
-		DataOutput:            unigate.DataOutput{IsReplay: true, PanLast4: "4111"},
-		TransactionOutput:     unigate.TransactionOutput{IsTransactionApproved: true},
-	}
+	replayed := []byte(`{"magTranID":"m2","customerTransactionID":"cst-ar-735",` +
+		`"dataOutput":{"isReplay":true,"panLast4":"4111"},` +
+		`"transactionOutput":{"isTransactionApproved":true}}`)
 	notice, ok := replayNotice(replayed)
 	if !ok {
 		t.Fatal("isReplay=true 应报重放")
@@ -152,7 +132,6 @@ func TestReplayNotice(t *testing.T) {
 	}
 }
 
-// 空数据在入口就该被拦下，不能送给 Magensa 换回一个语焉不详的 UnknownError。
 func TestEmvRejectsBadRequest(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
