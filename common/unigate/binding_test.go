@@ -199,6 +199,94 @@ func TestHTTPSUsesBundledMbedTLS(t *testing.T) {
 	}
 }
 
+func TestHTTPSAcceptsPartiallyParsableCABundle(t *testing.T) {
+	caPEM := pem.EncodeToMemory(&pem.Block{
+		Type:  "CERTIFICATE",
+		Bytes: testTLSServer.Certificate().Raw,
+	})
+	caPEM = append(caPEM, []byte(
+		"-----BEGIN CERTIFICATE-----\nnot-a-certificate\n-----END CERTIFICATE-----\n",
+	)...)
+	caFile, err := os.CreateTemp(t.TempDir(), "unigate-partial-ca-*.pem")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := caFile.Write(caPEM); err != nil {
+		t.Fatal(err)
+	}
+	if err := caFile.Close(); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("UNIGATE_CA_BUNDLE", caFile.Name())
+
+	response, err := Execute(ClientOptions{
+		BaseURL:      testTLSServer.URL + "/Unigate",
+		CustomerCode: "CODE",
+		UserName:     "USER",
+		Password:     "PASS",
+		Timeout:      5 * time.Second,
+	}, Request{
+		Operation:             OperationToken,
+		CustomerTransactionID: "order-partial-ca",
+		TransactionType:       "SALE",
+		Amount:                1,
+		Token:                 "token",
+	})
+	if err != nil {
+		t.Fatalf("部分证书无法解析时仍应使用其余 CA: %v", err)
+	}
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("HTTPS 响应状态不正确: %+v", response)
+	}
+}
+
+func TestHTTPSChunkedResponseAfterCloseNotify(t *testing.T) {
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Connection", "close")
+		w.WriteHeader(http.StatusOK)
+		w.(http.Flusher).Flush()
+		_, _ = w.Write([]byte(`{"magTranID":"CHUNKED"}`))
+	}))
+	server.StartTLS()
+	t.Cleanup(server.Close)
+
+	caFile, err := os.CreateTemp(t.TempDir(), "unigate-chunked-ca-*.pem")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := pem.Encode(caFile, &pem.Block{
+		Type:  "CERTIFICATE",
+		Bytes: server.Certificate().Raw,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := caFile.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	response, err := Execute(ClientOptions{
+		BaseURL:      server.URL + "/Unigate",
+		CustomerCode: "CODE",
+		UserName:     "USER",
+		Password:     "PASS",
+		CAPath:       caFile.Name(),
+		Timeout:      5 * time.Second,
+	}, Request{
+		Operation:             OperationToken,
+		CustomerTransactionID: "order-chunked",
+		TransactionType:       "SALE",
+		Amount:                1,
+		Token:                 "token",
+	})
+	if err != nil {
+		t.Fatalf("close_notify 不应被当作 I/O 错误: %v", err)
+	}
+	if !strings.Contains(string(response.Body), `"magTranID":"CHUNKED"`) {
+		t.Fatalf("chunked 响应不完整: %s", response.Body)
+	}
+}
+
 func TestExecuteReturnsTransportError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	baseURL := server.URL + "/Unigate"

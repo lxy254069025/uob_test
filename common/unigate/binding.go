@@ -9,6 +9,8 @@ package unigate
 #cgo linux,amd64 LDFLAGS: ${SRCDIR}/lib/linux_amd64/libunigate.a -pthread
 #cgo linux,arm64 LDFLAGS: ${SRCDIR}/lib/linux_arm64/libunigate.a -pthread
 
+#define UNIGATE_C_SDK_REVISION 2026110101
+
 #include <stdlib.h>
 #include "unigate.h"
 

@@ -356,6 +356,10 @@ CGO_ENABLED=1
 修改 C 代码后需要用与 Go 构建相同的 `GOOS`、`GOARCH` 重新执行 `make`，再构建
 Go 程序。cgo 不支持跨架构复用静态库。
 
+Go 构建缓存不会自动跟踪外部 `libunigate.a` 的内容变化。重新生成静态库后，如仍在
+本机继续调试，首次 Go 构建应使用 `go build -a` / `go test -a`，或者先执行
+`go clean -cache`，避免链接缓存中的旧 C SDK。
+
 Linux amd64 的 Go 编译还必须让 cgo 使用同一套 musl 工具链：
 
 ```sh

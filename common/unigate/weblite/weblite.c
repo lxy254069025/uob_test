@@ -2003,6 +2003,10 @@ static void set_error(weblite_response_t *resp, weblite_error_t err, const char 
         snprintf(resp->error_msg, sizeof(resp->error_msg), "%s", msg);
 }
 
+#ifdef WEBLITE_HAS_TLS
+extern const char *wl_tls_last_error(void);
+#endif
+
 static weblite_error_t do_http_request(const weblite_request_t *req,
                                        weblite_response_t *resp,
                                        uint32_t timeout_ms,
@@ -2049,7 +2053,12 @@ static weblite_error_t do_http_request(const weblite_request_t *req,
         if (url.is_tls) {
             tls_ctx = wl_tls_connect(sock, url.host, tls_verify, ca_path);
             if (!tls_ctx) {
-                set_error(resp, WEBLITE_ERR_TLS, "TLS handshake failed");
+                const char *detail = wl_tls_last_error();
+                char message[256];
+                snprintf(message, sizeof(message), "TLS handshake failed%s%s",
+                         detail != NULL ? ": " : "",
+                         detail != NULL ? detail : "");
+                set_error(resp, WEBLITE_ERR_TLS, message);
                 wl_platform_socket_close(sock);
                 wl_url_free(&url);
                 result = WEBLITE_ERR_TLS;
@@ -2110,7 +2119,16 @@ static weblite_error_t do_http_request(const weblite_request_t *req,
         wl_buf_free(&req_buf);
 
         if (send_rc < 0) {
+#ifdef WEBLITE_HAS_TLS
+            const char *detail = url.is_tls ? wl_tls_last_error() : NULL;
+            char message[256];
+            snprintf(message, sizeof(message), "Send failed%s%s",
+                     detail != NULL ? ": " : "",
+                     detail != NULL ? detail : "");
+            set_error(resp, WEBLITE_ERR_IO, message);
+#else
             set_error(resp, WEBLITE_ERR_IO, "Send failed");
+#endif
 #ifdef WEBLITE_HAS_TLS
             if (tls_ctx) wl_tls_close(tls_ctx);
 #endif
@@ -2130,7 +2148,16 @@ static weblite_error_t do_http_request(const weblite_request_t *req,
         while (1) {
             int n = conn_recv(sock, tls_ctx, url.is_tls, tmp, sizeof(tmp));
             if (n < 0) {
+#ifdef WEBLITE_HAS_TLS
+                const char *detail = url.is_tls ? wl_tls_last_error() : NULL;
+                char message[256];
+                snprintf(message, sizeof(message), "Receive failed%s%s",
+                         detail != NULL ? ": " : "",
+                         detail != NULL ? detail : "");
+                set_error(resp, WEBLITE_ERR_IO, message);
+#else
                 set_error(resp, WEBLITE_ERR_IO, "Receive failed");
+#endif
                 result = WEBLITE_ERR_IO;
                 break;
             }
@@ -2326,7 +2353,12 @@ static weblite_error_t do_ws_request(const weblite_request_t *req,
     if (url.is_tls) {
         ws_conn.tls = wl_tls_connect(sock, url.host, tls_verify, ca_path);
         if (!ws_conn.tls) {
-            set_error(resp, WEBLITE_ERR_TLS, "WS TLS handshake failed");
+            const char *detail = wl_tls_last_error();
+            char message[256];
+            snprintf(message, sizeof(message), "WS TLS handshake failed%s%s",
+                     detail != NULL ? ": " : "",
+                     detail != NULL ? detail : "");
+            set_error(resp, WEBLITE_ERR_TLS, message);
             wl_platform_socket_close(sock);
             wl_url_free(&url);
             return WEBLITE_ERR_TLS;

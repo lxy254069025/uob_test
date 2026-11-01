@@ -1,5 +1,6 @@
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 
 #include "mbedtls/ctr_drbg.h"
@@ -22,9 +23,52 @@ typedef struct wl_tls {
 } wl_tls_t;
 
 static _Thread_local const char *request_ca_path;
+static _Thread_local char tls_error[256];
 
 void unigate_tls_set_request_ca_path(const char *path) {
     request_ca_path = path;
+}
+
+const char *wl_tls_last_error(void) {
+    return tls_error[0] == '\0' ? NULL : tls_error;
+}
+
+static void set_tls_error(const char *stage, int result) {
+    snprintf(tls_error, sizeof(tls_error), "%s: mbedTLS error %d (0x%04X)",
+             stage, result, (unsigned int)result & 0xFFFFU);
+}
+
+static void set_tls_io_error(const char *stage, const mbedtls_ssl_context *ssl, int result) {
+    if (ssl != NULL &&
+        ssl->MBEDTLS_PRIVATE(in_msgtype) == MBEDTLS_SSL_MSG_ALERT &&
+        ssl->MBEDTLS_PRIVATE(in_msglen) >= 2 &&
+        ssl->MBEDTLS_PRIVATE(in_msg) != NULL) {
+        snprintf(tls_error, sizeof(tls_error),
+                 "%s: TLS alert level=%u description=%u; mbedTLS error %d (0x%04X)",
+                 stage,
+                 ssl->MBEDTLS_PRIVATE(in_msg)[0],
+                 ssl->MBEDTLS_PRIVATE(in_msg)[1],
+                 result,
+                 (unsigned int)result & 0xFFFFU);
+        return;
+    }
+    set_tls_error(stage, result);
+}
+
+static int tls_is_close_notify(const mbedtls_ssl_context *ssl) {
+    return ssl != NULL &&
+           ssl->MBEDTLS_PRIVATE(in_msgtype) == MBEDTLS_SSL_MSG_ALERT &&
+           ssl->MBEDTLS_PRIVATE(in_msglen) >= 2 &&
+           ssl->MBEDTLS_PRIVATE(in_msg) != NULL &&
+           ssl->MBEDTLS_PRIVATE(in_msg)[1] == MBEDTLS_SSL_ALERT_MSG_CLOSE_NOTIFY;
+}
+
+static void set_tls_verify_error(int flags) {
+    char detail[384];
+
+    mbedtls_x509_crt_verify_info(detail, sizeof(detail), "! ", flags);
+    snprintf(tls_error, sizeof(tls_error),
+             "certificate verification failed: %.200s", detail);
 }
 
 static int tls_transport_send(void *context, const unsigned char *buf, size_t len) {
@@ -77,8 +121,10 @@ wl_tls_t *wl_tls_connect(
     wl_tls_t *tls = calloc(1, sizeof(*tls));
     int result;
 
+    tls_error[0] = '\0';
     if (tls == NULL || hostname == NULL) {
         free(tls);
+        snprintf(tls_error, sizeof(tls_error), "initializing TLS context failed");
         return NULL;
     }
     tls->socket = socket;
@@ -96,6 +142,7 @@ wl_tls_t *wl_tls_connect(
         sizeof(personalization) - 1
     );
     if (result != 0) {
+        set_tls_error("initializing random generator", result);
         tls_destroy(tls);
         return NULL;
     }
@@ -106,6 +153,7 @@ wl_tls_t *wl_tls_connect(
         MBEDTLS_SSL_PRESET_DEFAULT
     );
     if (result != 0) {
+        set_tls_error("initializing TLS configuration", result);
         tls_destroy(tls);
         return NULL;
     }
@@ -115,10 +163,14 @@ wl_tls_t *wl_tls_connect(
 
     if (verify) {
         if (effective_ca_path == NULL || effective_ca_path[0] == '\0') {
+            snprintf(tls_error, sizeof(tls_error),
+                     "certificate verification requires a CA bundle; set ca_path or UNIGATE_CA_BUNDLE");
             tls_destroy(tls);
             return NULL;
         }
-        if (mbedtls_x509_crt_parse_file(&tls->ca_chain, effective_ca_path) != 0) {
+        result = mbedtls_x509_crt_parse_file(&tls->ca_chain, effective_ca_path);
+        if (result < 0 || tls->ca_chain.raw.p == NULL) {
+            set_tls_error("parsing CA bundle", result);
             tls_destroy(tls);
             return NULL;
         }
@@ -128,8 +180,12 @@ wl_tls_t *wl_tls_connect(
         mbedtls_ssl_conf_authmode(&tls->config, MBEDTLS_SSL_VERIFY_NONE);
     }
 
-    if (mbedtls_ssl_setup(&tls->ssl, &tls->config) != 0 ||
-        mbedtls_ssl_set_hostname(&tls->ssl, hostname) != 0) {
+    result = mbedtls_ssl_setup(&tls->ssl, &tls->config);
+    if (result == 0) {
+        result = mbedtls_ssl_set_hostname(&tls->ssl, hostname);
+    }
+    if (result != 0) {
+        set_tls_error("initializing TLS session", result);
         tls_destroy(tls);
         return NULL;
     }
@@ -145,9 +201,18 @@ wl_tls_t *wl_tls_connect(
         result = mbedtls_ssl_handshake(&tls->ssl);
     } while (result == MBEDTLS_ERR_SSL_WANT_READ || result == MBEDTLS_ERR_SSL_WANT_WRITE);
 
-    if (result != 0 || (verify && mbedtls_ssl_get_verify_result(&tls->ssl) != 0)) {
+    if (result != 0) {
+        set_tls_error("TLS handshake", result);
         tls_destroy(tls);
         return NULL;
+    }
+    if (verify) {
+        uint32_t flags = mbedtls_ssl_get_verify_result(&tls->ssl);
+        if (flags != 0) {
+            set_tls_verify_error((int)flags);
+            tls_destroy(tls);
+            return NULL;
+        }
     }
     return tls;
 }
@@ -166,6 +231,7 @@ int wl_tls_send(wl_tls_t *tls, const void *data, size_t len) {
             continue;
         }
         if (result != MBEDTLS_ERR_SSL_WANT_READ && result != MBEDTLS_ERR_SSL_WANT_WRITE) {
+            set_tls_io_error("TLS write", &tls->ssl, result);
             return -1;
         }
     }
@@ -181,7 +247,12 @@ int wl_tls_recv(wl_tls_t *tls, void *buf, size_t len) {
         if (result >= 0) {
             return result;
         }
+        if (result == MBEDTLS_ERR_SSL_PEER_CLOSE_NOTIFY ||
+            tls_is_close_notify(&tls->ssl)) {
+            return 0;
+        }
         if (result != MBEDTLS_ERR_SSL_WANT_READ && result != MBEDTLS_ERR_SSL_WANT_WRITE) {
+            set_tls_io_error("TLS read", &tls->ssl, result);
             return -1;
         }
     }
