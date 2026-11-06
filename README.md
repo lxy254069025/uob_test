@@ -62,12 +62,15 @@
 POST /author
 Content-Type: application/json
 
-{"imei":"860000000000001","sn":"SN-0001"}
+{"imei":"860000000000001"}
 ```
 
 ```json
-{"token":"eyJhbGciOi...","imei":"860000000000001","expiresAt":1760000000,"expiresIn":2592000}
+{"token":"eyJhbGciOi...","sn":"martbox-000001","expiresAt":1760000000,"expiresIn":2592000}
 ```
+
+`sn` 是设备号，当前由 IMEI 后 6 位生成（`martbox-xxxxxx`）；APP 保存它，并在
+WebSocket 上行报文里作为设备标识。接入 machines-rpc 设备表后应改为按 IMEI 查真实 SN。
 
 token 用 HS256 签发，密钥来自配置 `Auth.Secret`，有效期 `Auth.Expire`（默认 30 天）。
 载荷带 `imei`（同时写入 `sub`）、`iss`、`iat`、`nbf`、`exp`。
@@ -78,7 +81,7 @@ imei 为空或请求体不是合法 JSON 返回 400；签发失败（例如没�
 
 ⚠️ 当前不校验 imei 是否合法、是否是已登记的设备，**只要非空就能换到 token**。
 等 machines-rpc 能查设备表后，应在 `Author` 里补一层"imei 必须存在且状态正常"的校验。
-另外 access_token 目前还没有接到 websocket 建连校验上。
+WebSocket 建连已经用这个 token 校验（`Authorization: Bearer <token>`）。
 
 ## APP 首页数据
 
@@ -262,22 +265,31 @@ ARQC、磁道、KSN、卡号、CVV 这些字段只打印长度和截断的 SHA-2
 
 设备（自动售卖机）通过 websocket 保持长连接，服务端可随时下发指令。
 
-建连：`GET /v1/ws/machine?sn=<设备序列号>[&token=<配置里的 Token>]`
+建连：
+
+```
+GET /v1/ws
+Authorization: Bearer <token>
+```
+
+握手时服务端校验 token，并按 token 里的 imei 推导 sn；不再使用 `?sn` / `?token`
+查询参数。APP 还没拿到 token 之前不会连接。
 
 报文格式统一为：
 
 ```json
-{"type":"command","sn":"SN-0001","id":"msg-1","data":{"action":"drop"},"ts":1759000000000}
+{"type":"command","sn":"martbox-000001","id":"msg-1","data":{"action":"drop"},"ts":1759000000000}
 ```
 
-`type` 取值：`register`（设备注册，可在这条报文里补 sn）、`status`（定时上报状态，兼作
-应用层心跳）、`event`（设备事件上报）、`ack`（指令回执，用 `id` 关联原消息）、
-`command`（服务端下发指令）、`error`（服务端报错）。
+`type` 取值：`status`（定时上报状态，兼作应用层心跳）、`temperature`
+（`get_temperature` 的回复）、`device_event`（设备事件上报）、`ack`（指令回执，用
+`id` 关联原消息）、`command`（服务端下发指令）、`error`（服务端报错）。
+未知类型只记日志，不影响连接。
 
 设备定时上报的状态报文长这样（服务端按 `sn` 保存最近一次，供后续查询/落库）：
 
 ```json
-{"type":"status","sn":"martbox-dev-0001","ts":1728000000000,
+{"type":"status","sn":"martbox-000001","ts":1728000000000,
  "data":{"battery":80,"volume":5,"networkType":"wifi","temperature":"","hardwareAvailable":true,
          "devices":[{"module":"lock","online":true,"busy":false,"doorOpen":false,"lockOpen":false},
                     {"module":"camera","online":true,"busy":false},
@@ -294,10 +306,11 @@ ARQC、磁道、KSN、卡号、CVV 这些字段只打印长度和截断的 SHA-2
 
 ```
 POST /v1/ws/push
-{"sn":"SN-0001","type":"command","id":"msg-1","data":{"action":"drop"}}
+{"sn":"martbox-000001","type":"command","id":"msg-1","data":{"action":"drop"}}
 ```
 
 握手行为：设备端（不带 `Origin`）直接放行；浏览器来源必须在 `WebSocket.AllowedOrigins` 白名单里。
+没有 `Authorization: Bearer <token>` 或 token 校验失败时返回 401，不会升级连接。
 
 心跳与断线：**心跳是应用层的 status 报文**，设备定时上报状态，服务端收到就知道它还活着；
 超过 `WebSocket.HeartbeatTimeout` 秒没收到客户端任何数据（status 或其它业务报文）就判定掉线，
@@ -306,7 +319,7 @@ POST /v1/ws/push
 超时原因会写进日志：
 
 ```
-ws: 设备断线 sn=SN-0001 addr=1.2.3.4:5678 原因=心跳超时（1m30s 内未收到客户端心跳）
+ws: 设备断线 sn=martbox-000001 addr=1.2.3.4:5678 原因=心跳超时（1m30s 内未收到客户端心跳）
 ```
 
 协议层的 ping/pong 仍然兼容（收到 ping 照旧回 pong，收到 pong 也算存活），

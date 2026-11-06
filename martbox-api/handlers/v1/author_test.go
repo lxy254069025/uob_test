@@ -64,8 +64,9 @@ func TestAuthorReturnsTokenForIMEI(t *testing.T) {
 	if resp.Token == "" {
 		t.Fatal("token 不能为空")
 	}
-	if resp.IMEI != testIMEI {
-		t.Fatalf("imei 期望 %s，实际 %s", testIMEI, resp.IMEI)
+	// APP 用 sn 标识设备、拼上行报文，必须和 token 推导出的设备号一致。
+	if resp.SN != token.DeviceSN(testIMEI) {
+		t.Fatalf("sn 期望 %s，实际 %s", token.DeviceSN(testIMEI), resp.SN)
 	}
 	if resp.ExpiresIn <= 0 || resp.ExpiresAt <= time.Now().Unix() {
 		t.Fatalf("有效期不符合预期: %+v", resp)
@@ -93,8 +94,8 @@ func TestAuthorTrimsIMEI(t *testing.T) {
 		t.Fatalf("期望 200，实际 %d: %s", w.Code, w.Body.String())
 	}
 
-	if got := decodeAuthorResponse(t, w).IMEI; got != testIMEI {
-		t.Fatalf("imei 应去掉首尾空格，实际 %q", got)
+	if got := decodeAuthorResponse(t, w).SN; got != token.DeviceSN(testIMEI) {
+		t.Fatalf("imei 应去掉首尾空格后再生成 sn，实际 %q", got)
 	}
 }
 

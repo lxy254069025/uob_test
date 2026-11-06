@@ -2,6 +2,7 @@ package ws
 
 import (
 	"log"
+	"net/http"
 	"sync"
 	"time"
 
@@ -10,7 +11,10 @@ import (
 
 // Options 是 Hub 的运行参数，零值会被 withDefaults 补成默认值。
 type Options struct {
-	Token          string   // 非空时，连接必须带 ?token= 且一致
+	// Authenticate 非空时用于校验握手请求并返回设备 SN，例如解析
+	// Authorization: Bearer <token>。设置后不再读取 ?sn / ?token 参数。
+	Authenticate   func(r *http.Request) (sn string, err error)
+	Token          string   // 兼容旧客户端：非空时，连接必须带 ?token= 且一致
 	AllowedOrigins []string // 允许的浏览器 Origin，"*" 表示不限制；为空表示只允许非浏览器客户端
 	ReadLimit      int64    // 单条上行报文大小上限，字节
 	// HeartbeatTimeout 是"多久没收到客户端心跳就断开"。

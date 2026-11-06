@@ -175,6 +175,21 @@ func TestEmptyIMEIIsRejected(t *testing.T) {
 	}
 }
 
+func TestDeviceSNUsesIMEISuffix(t *testing.T) {
+	cases := map[string]string{
+		"860000000000001":   "martbox-000001",
+		" 123456789012345 ": "martbox-012345",
+		"abc123":            "martbox-abc123",
+		"":                  "",
+	}
+
+	for imei, want := range cases {
+		if got := DeviceSN(imei); got != want {
+			t.Fatalf("DeviceSN(%q) 期望 %q，实际 %q", imei, want, got)
+		}
+	}
+}
+
 func TestNewSignerUsesDefaultTTL(t *testing.T) {
 	for _, ttl := range []time.Duration{0, -time.Hour} {
 		if got := NewSigner(testSecret, testIssuer, ttl).TTL(); got != DefaultTTL {

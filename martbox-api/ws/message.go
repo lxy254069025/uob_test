@@ -8,12 +8,14 @@ import (
 // 报文类型。上行（设备 -> 服务端）和下行（服务端 -> 设备）共用一套 type，
 // 设备端按 type 分发即可，新增类型不会影响旧客户端。
 const (
-	TypeRegister = "register" // 设备上行：注册，data 里可以带设备信息
-	TypeStatus   = "status"   // 设备上行：定时上报状态，兼作应用层心跳
-	TypeEvent    = "event"    // 设备上行：事件上报（出货、故障、投币等）
-	TypeAck      = "ack"      // 双向：某条消息的回执，用 id 关联原消息
-	TypeCommand  = "command"  // 服务端下行：指令（出货、重启、改配置等）
-	TypeError    = "error"    // 服务端下行：错误提示
+	TypeRegister    = "register"     // 设备上行：注册，data 里可以带设备信息
+	TypeStatus      = "status"       // 设备上行：定时上报状态，兼作应用层心跳
+	TypeTemperature = "temperature"  // 设备上行：get_temperature 的回复
+	TypeDeviceEvent = "device_event" // 设备上行：设备事件上报（热插拔、模块恢复等）
+	TypeEvent       = "event"        // 旧客户端的设备事件类型，保留兼容
+	TypeAck         = "ack"          // 双向：某条消息的回执，用 id 关联原消息
+	TypeCommand     = "command"      // 服务端下行：指令（出货、重启、改配置等）
+	TypeError       = "error"        // 服务端下行：错误提示
 )
 
 // Message 是设备与服务端之间统一的 JSON 报文。

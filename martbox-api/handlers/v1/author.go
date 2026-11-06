@@ -20,8 +20,8 @@ type AuthorRequest struct {
 
 // AuthorResponse 设备授权响应。
 type AuthorResponse struct {
-	Token     string `json:"token"`     // 后续建 websocket 长连接时带上
-	IMEI      string `json:"imei"`      // 原样回显，便于设备端校对
+	Token     string `json:"token"`     // 后续 HTTP / WebSocket 请求都带上
+	SN        string `json:"sn"`        // 设备号，WebSocket 上行报文用它标识设备
 	ExpiresAt int64  `json:"expiresAt"` // 过期时间，秒级时间戳
 	ExpiresIn int64  `json:"expiresIn"` // 剩余有效秒数
 }
@@ -57,7 +57,7 @@ func Author(c *gin.Context) {
 
 	c.JSON(http.StatusOK, AuthorResponse{
 		Token:     signed,
-		IMEI:      imei,
+		SN:        token.DeviceSN(imei),
 		ExpiresAt: claims.ExpiresAt.Unix(),
 		ExpiresIn: int64(time.Until(claims.ExpiresAt.Time).Seconds()),
 	})

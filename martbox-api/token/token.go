@@ -7,6 +7,7 @@ package token
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/golang-jwt/jwt/v4"
@@ -18,6 +19,22 @@ const DefaultTTL = 30 * 24 * time.Hour
 // ErrEmptySecret 表示没有配置签名密钥。此时拒绝签发和校验，
 // 避免用空密钥签出任何人都能伪造的 token。
 var ErrEmptySecret = errors.New("token: 未配置签名密钥 Auth.Secret")
+
+// DeviceSN 根据 IMEI 生成设备号。
+//
+// 现在还没有设备表，先取 IMEI 后 6 位拼成 "martbox-xxxxxx"；接入 machines-rpc
+// 的设备表后，应改为按 IMEI 查询真实 SN。
+func DeviceSN(imei string) string {
+	imei = strings.TrimSpace(imei)
+	if imei == "" {
+		return ""
+	}
+	if len(imei) > 6 {
+		imei = imei[len(imei)-6:]
+	}
+
+	return "martbox-" + imei
+}
 
 // Claims 是设备 token 的载荷。
 type Claims struct {

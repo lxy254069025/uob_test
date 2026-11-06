@@ -1,23 +1,29 @@
 package ws
 
 import (
+	"errors"
+	"log"
 	"net/http"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 )
 
-// Handle 是 Gin 的升级入口：GET /v1/ws/machine?sn=xxx[&token=yyy]。
+// Handle 是 Gin 的升级入口。启用 Authenticate 时，握手请求用
+// Authorization: Bearer <token> 鉴权，并从 token 解析设备 SN；
+// 未启用时保留旧的 ?sn / ?token 查询参数模式。
 // 升级成功后连接交给 Hub 管理，函数返回时连接仍然存活。
 func (h *Hub) Handle(c *gin.Context) {
-	sn := strings.TrimSpace(c.Query("sn"))
-	if sn == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "缺少设备序列号 sn"})
+	sn, err := h.authenticate(c.Request)
+	if err != nil {
+		log.Printf("ws: 设备鉴权失败 addr=%s err=%v", c.Request.RemoteAddr, err)
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "token 校验失败"})
 		return
 	}
 
-	if h.opts.Token != "" && c.Query("token") != h.opts.Token {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "token 校验失败"})
+	sn = strings.TrimSpace(sn)
+	if sn == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "缺少设备序列号 sn"})
 		return
 	}
 
@@ -33,6 +39,20 @@ func (h *Hub) Handle(c *gin.Context) {
 
 	go client.writePump()
 	go client.readPump()
+}
+
+// authenticate 返回握手请求对应的设备 SN。
+// 优先使用外部注入的鉴权函数；否则退回旧的查询参数鉴权。
+func (h *Hub) authenticate(r *http.Request) (string, error) {
+	if h.opts.Authenticate != nil {
+		return h.opts.Authenticate(r)
+	}
+
+	if h.opts.Token != "" && r.URL.Query().Get("token") != h.opts.Token {
+		return "", errors.New("token 校验失败")
+	}
+
+	return r.URL.Query().Get("sn"), nil
 }
 
 // checkOrigin 约束浏览器来源；设备端（非浏览器）请求不带 Origin，直接放行。

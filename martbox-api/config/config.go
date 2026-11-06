@@ -19,7 +19,7 @@ type PcOrderPayLink struct {
 // WebSocketConf 是设备长连接的配置。所有时间字段单位为秒，数值为 0 时使用代码里的默认值。
 type WebSocketConf struct {
 	Path           string   `yaml:"Path"`           // 升级地址，默认 /v1/ws
-	Token          string   `yaml:"Token"`          // 非空时，设备连接必须带 ?token= 且与之一致
+	Token          string   `yaml:"Token"`          // 已废弃：WebSocket 改用 Authorization: Bearer <token>
 	AllowedOrigins []string `yaml:"AllowedOrigins"` // 浏览器来源白名单；设备端不带 Origin，直接放行
 	// 心跳由客户端定时发 ping、服务端回 pong。这个值是"多久没收到客户端心跳就断开"。
 	HeartbeatTimeout int   `yaml:"HeartbeatTimeout"` // 秒

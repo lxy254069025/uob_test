@@ -2,6 +2,7 @@ package ws
 
 import (
 	"encoding/json"
+	"errors"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -146,6 +147,41 @@ func TestHandleRejectsWrongToken(t *testing.T) {
 	got := env.do(http.MethodGet, "/v1/ws/machine?sn="+testSN+"&token=wrong", "", nil).Code
 	if got != http.StatusUnauthorized {
 		t.Fatalf("token 不匹配期望 401，实际 %d", got)
+	}
+}
+
+func TestHandleUsesAuthenticatedSN(t *testing.T) {
+	env := newTestEnv(t, Options{
+		Authenticate: func(r *http.Request) (string, error) {
+			if r.Header.Get("Authorization") != "Bearer good-token" {
+				return "", errors.New("bad token")
+			}
+			return testSN, nil
+		},
+	})
+
+	conn, _, err := env.l.dial("", http.Header{"Authorization": []string{"Bearer good-token"}})
+	if err != nil {
+		t.Fatalf("Bearer token 校验通过后应该连接成功: %v", err)
+	}
+	defer conn.Close()
+
+	if !waitFor(t, 2*time.Second, func() bool { return env.hub.IsOnline(testSN) }) {
+		t.Fatal("鉴权成功后应按 token 解析出的 SN 上线")
+	}
+}
+
+func TestHandleRejectsFailedAuthentication(t *testing.T) {
+	env := newTestEnv(t, Options{
+		Authenticate: func(*http.Request) (string, error) {
+			return "", errors.New("bad token")
+		},
+	})
+
+	got := env.do(http.MethodGet, "/v1/ws/machine", "",
+		http.Header{"Authorization": []string{"Bearer bad-token"}}).Code
+	if got != http.StatusUnauthorized {
+		t.Fatalf("鉴权失败期望 401，实际 %d", got)
 	}
 }
 
