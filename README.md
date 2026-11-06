@@ -30,6 +30,7 @@
 │   ├── handlers
 │   │   └── v1
 │   │       ├── author.go       // 设备授权，imei 换 token
+│   │       ├── home.go         // APP 首页 banner + 商品
 │   │       ├── machine_ws.go   // 设备上行报文处理入口
 │   │       └── transaction.go
 │   ├── main.go
@@ -78,6 +79,54 @@ imei 为空或请求体不是合法 JSON 返回 400；签发失败（例如没�
 ⚠️ 当前不校验 imei 是否合法、是否是已登记的设备，**只要非空就能换到 token**。
 等 machines-rpc 能查设备表后，应在 `Author` 里补一层"imei 必须存在且状态正常"的校验。
 另外 access_token 目前还没有接到 websocket 建连校验上。
+
+## APP 首页数据
+
+APP 首屏通过一个接口同时获取 banner 和商品：
+
+```
+GET /v1/home
+```
+
+字段名与 APP 端 Kotlin 的 `Banner`、`Product` 数据类一致；`badgeText`、
+`originalPrice`、`discountLabel` 可以为空，服务端会显式输出 `null`，不省略字段。
+
+```json
+{
+  "banners": [
+    {
+      "id": 1,
+      "title": "新客专享",
+      "subtitle": "首单立减 5 元",
+      "ctaText": "立即领取",
+      "badgeText": "新人",
+      "url": "https://example.com/activities/new-user",
+      "imageUrl": "https://picsum.photos/seed/martbox-new-user/1200/480"
+    }
+  ],
+  "products": [
+    {
+      "name": "冰镇可乐 330ml",
+      "price": "3.50",
+      "originalPrice": "4.00",
+      "discountLabel": "限时特价",
+      "desc": "经典口味，冰镇后更好喝",
+      "imageUrl": "https://picsum.photos/seed/martbox-cola/600/600"
+    },
+    {
+      "name": "现磨美式咖啡",
+      "price": "12.00",
+      "originalPrice": null,
+      "discountLabel": null,
+      "desc": "中深烘焙，现点现做",
+      "imageUrl": "https://picsum.photos/seed/martbox-americano/600/600"
+    }
+  ]
+}
+```
+
+当前数据写死在 `martbox-api/handlers/v1/home.go`。接入运营后台后，需要按设备所属
+门店/城市过滤，并补上缓存。
 
 ## Magensa 交易接口
 

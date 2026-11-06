@@ -16,6 +16,7 @@ func InitRouter(router *gin.Engine) {
 	group.POST("/capture", v1.Capture) //扣款
 
 	router.POST("/author", v1.Author)
+	router.GET("/v1/home", v1.Home) // APP 首页 banner + 商品
 	initWebSocket(router)
 }
 
