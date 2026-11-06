@@ -89,7 +89,9 @@ GET /v1/home
 ```
 
 字段名与 APP 端 Kotlin 的 `Banner`、`Product` 数据类一致；`badgeText`、
-`originalPrice`、`discountLabel` 可以为空，服务端会显式输出 `null`，不省略字段。
+`originalPrice` 可以为空，服务端会显式输出 `null`，不省略字段。
+`off` 是整数优惠百分比（`12` 表示 12% off），客户端自己拼 `off` 后缀；
+没有优惠时为 `0`。
 
 ```json
 {
@@ -109,23 +111,24 @@ GET /v1/home
       "name": "冰镇可乐 330ml",
       "price": "3.50",
       "originalPrice": "4.00",
-      "discountLabel": "限时特价",
+      "off": 12,
       "desc": "经典口味，冰镇后更好喝",
-      "imageUrl": "https://picsum.photos/seed/martbox-cola/600/600"
+      "imageUrl": "https://pngimg.com/uploads/cocacola/coca_cola_PNG8909.png"
     },
     {
       "name": "现磨美式咖啡",
       "price": "12.00",
       "originalPrice": null,
-      "discountLabel": null,
+      "off": 0,
       "desc": "中深烘焙，现点现做",
-      "imageUrl": "https://picsum.photos/seed/martbox-americano/600/600"
+      "imageUrl": "https://pngimg.com/uploads/mug_coffee/mug_coffee_PNG97402.png"
     }
   ]
 }
 ```
 
-当前数据写死在 `martbox-api/handlers/v1/home.go`。接入运营后台后，需要按设备所属
+当前数据写死在 `martbox-api/handlers/v1/home.go`：接口返回 3 条 banner 和 16 条商品，
+商品由 3 条基础数据循环填充，方便联调 4x4 宫格。接入运营后台后，需要按设备所属
 门店/城市过滤，并补上缓存。
 
 ## Magensa 交易接口

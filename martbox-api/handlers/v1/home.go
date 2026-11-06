@@ -22,9 +22,10 @@ type Product struct {
 	Name          string  `json:"name"`
 	Price         string  `json:"price"`
 	OriginalPrice *string `json:"originalPrice"`
-	DiscountLabel *string `json:"discountLabel"`
-	Desc          string  `json:"desc"`
-	ImageURL      string  `json:"imageUrl"`
+	// Off 是优惠百分比，客户端自己拼 "off" 后缀；没有优惠时为 0。
+	Off      int    `json:"off"`
+	Desc     string `json:"desc"`
+	ImageURL string `json:"imageUrl"`
 }
 
 // HomeResponse 首页数据：一次请求同时返回 banner 和商品，减少 APP 首屏请求数。
@@ -35,7 +36,8 @@ type HomeResponse struct {
 
 // 目前是假数据，等运营后台/商品库接入后改为从数据库读取。
 // 可空字段用指针表示，序列化时会输出 null，与 Kotlin 的 String? 对应。
-// 图片地址先用 picsum.photos 占位，APP 联调时能直接加载；接入后台后换成 CDN 地址。
+// 图片先用外部占位素材：banner 用 picsum，商品用透明底、无边框的 PNG（pngimg），
+// APP 联调时可直接加载；上线前换成自有 CDN，并确认素材版权。
 var homeBanners = []Banner{
 	{
 		ID:        1,
@@ -68,32 +70,50 @@ var homeBanners = []Banner{
 	},
 }
 
-var homeProducts = []Product{
+// homeProductCount 是首页一次返回的商品数，16 条方便 APP 联调 4x4 宫格。
+const homeProductCount = 16
+
+// 基础商品只有 3 条，按顺序循环填充到 homeProductCount 条。
+var homeProducts = repeatProducts([]Product{
 	{
 		Name:          "冰镇可乐 330ml",
 		Price:         "3.50",
 		OriginalPrice: stringPtr("4.00"),
-		DiscountLabel: stringPtr("限时特价"),
-		Desc:          "经典口味，冰镇后更好喝",
-		ImageURL:      "https://picsum.photos/seed/martbox-cola/600/600",
+		// (4.00-3.50)/4.00 = 12.5%，向下取整为 12；"off" 由客户端拼接。
+		Off:      12,
+		Desc:     "经典口味，冰镇后更好喝",
+		ImageURL: "https://pngimg.com/uploads/cocacola/coca_cola_PNG8909.png",
 	},
 	{
 		Name:  "现磨美式咖啡",
 		Price: "12.00",
-		// 无划线价、无优惠标签时输出 null。
+		// 没有划线价，off 为 0，客户端据此不展示优惠。
 		OriginalPrice: nil,
-		DiscountLabel: nil,
+		Off:           0,
 		Desc:          "中深烘焙，现点现做",
-		ImageURL:      "https://picsum.photos/seed/martbox-americano/600/600",
+		ImageURL:      "https://pngimg.com/uploads/mug_coffee/mug_coffee_PNG97402.png",
 	},
 	{
-		Name:          "原味薯片 70g",
+		Name:          "蜂蜜烧烤味薯片",
 		Price:         "6.50",
 		OriginalPrice: stringPtr("7.50"),
-		DiscountLabel: stringPtr("会员价"),
-		Desc:          "酥脆轻薄，追剧必备",
-		ImageURL:      "https://picsum.photos/seed/martbox-chips/600/600",
+		// (7.50-6.50)/7.50 ≈ 13.3%，向下取整为 13。
+		Off:      13,
+		Desc:     "甜辣烧烤风味，酥脆不油腻",
+		ImageURL: "https://pngimg.com/uploads/potato_chips/potato_chips_PNG43.png",
 	},
+}, homeProductCount)
+
+func repeatProducts(base []Product, count int) []Product {
+	if len(base) == 0 || count <= 0 {
+		return nil
+	}
+
+	products := make([]Product, 0, count)
+	for i := 0; i < count; i++ {
+		products = append(products, base[i%len(base)])
+	}
+	return products
 }
 
 // Home 返回 APP 首页的 banner 与商品数据。

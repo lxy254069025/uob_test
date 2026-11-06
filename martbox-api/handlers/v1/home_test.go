@@ -39,8 +39,8 @@ func TestHomeReturnsBannersAndProducts(t *testing.T) {
 		t.Fatalf("banner 和商品都不能为空: %s", w.Body.String())
 	}
 	// 下面的断言依赖测试数据里正好有"无角标 banner"和"无划线价商品"。
-	if len(payload.Banners) < 3 || len(payload.Products) < 2 {
-		t.Fatalf("测试数据不足: banners=%d products=%d", len(payload.Banners), len(payload.Products))
+	if len(payload.Banners) < 3 || len(payload.Products) != 16 {
+		t.Fatalf("测试数据数量不符: banners=%d products=%d", len(payload.Banners), len(payload.Products))
 	}
 
 	bannerKeys := []string{"id", "title", "subtitle", "ctaText", "badgeText", "url", "imageUrl"}
@@ -54,13 +54,19 @@ func TestHomeReturnsBannersAndProducts(t *testing.T) {
 		}
 	}
 
-	productKeys := []string{"name", "price", "originalPrice", "discountLabel", "desc", "imageUrl"}
+	productKeys := []string{"name", "price", "originalPrice", "off", "desc", "imageUrl"}
 	for i, product := range payload.Products {
 		assertJSONKeys(t, "product", i, product, productKeys)
 
 		var imageURL string
 		if err := json.Unmarshal(product["imageUrl"], &imageURL); err != nil || imageURL == "" {
 			t.Fatalf("product[%d].imageUrl 期望非空字符串，实际 %s", i, product["imageUrl"])
+		}
+
+		// off 是整数百分比，客户端自己拼 "off" 后缀；0 表示没有优惠。
+		var off int
+		if err := json.Unmarshal(product["off"], &off); err != nil || off < 0 {
+			t.Fatalf("product[%d].off 期望非负整数，实际 %s", i, product["off"])
 		}
 	}
 
@@ -71,8 +77,8 @@ func TestHomeReturnsBannersAndProducts(t *testing.T) {
 	if got := string(payload.Products[1]["originalPrice"]); got != "null" {
 		t.Fatalf("没有划线价的商品，originalPrice 期望 null，实际 %s", got)
 	}
-	if got := string(payload.Products[1]["discountLabel"]); got != "null" {
-		t.Fatalf("没有优惠标签的商品，discountLabel 期望 null，实际 %s", got)
+	if got := string(payload.Products[1]["off"]); got != "0" {
+		t.Fatalf("没有优惠的商品，off 期望 0，实际 %s", got)
 	}
 
 	// 再按 Go 类型解码，确认 id/price 等字段的类型和取值符合预期。
@@ -88,6 +94,12 @@ func TestHomeReturnsBannersAndProducts(t *testing.T) {
 	}
 	if response.Products[0].Price == "" || response.Products[0].Desc == "" {
 		t.Fatalf("商品价格/描述不能为空: %+v", response.Products[0])
+	}
+	if response.Products[0].Off != 12 {
+		t.Fatalf("首个商品 off 期望 12，实际 %d", response.Products[0].Off)
+	}
+	if response.Products[1].Off != 0 {
+		t.Fatalf("无优惠商品 off 期望 0，实际 %d", response.Products[1].Off)
 	}
 }
 
